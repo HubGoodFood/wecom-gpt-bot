@@ -11,8 +11,6 @@ from openai import OpenAI
 
 # 配置日志
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-logging.debug("🔑 API key prefix: %s", OPENAI_API_KEY[:10])
-logging.debug("🔑 API key length: %d", len(OPENAI_API_KEY))
 
 # 显示公网 IP
 try:
@@ -33,6 +31,9 @@ openai = OpenAI(api_key=OPENAI_API_KEY)
 
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
 app = Flask(__name__)
+
+logging.debug("🔑 API key prefix: %s", OPENAI_API_KEY[:10])
+logging.debug("🔑 API key length: %d", len(OPENAI_API_KEY))
 
 # 商品清单
 PRODUCTS = {
