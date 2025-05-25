@@ -82,7 +82,13 @@ def ask_gpt(question):
     return response.json()["choices"][0]["message"]["content"]
 
 @app.route("/wechat_kf_callback", methods=["POST"])
-def wechat_kf():
+def wechat_kf_callback():
+    try:
+        # 处理逻辑...
+        return "success"
+    except Exception as e:
+        logging.exception("❌ 回调处理失败")
+        return "error", 500
     try:
         msg_signature = request.args.get("msg_signature")
         timestamp = request.args.get("timestamp")
