@@ -74,7 +74,7 @@ def ask_gpt(question):
         return res.json()["choices"][0]["message"]["content"]
     return "AI 回复失败。"
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET", "POST", "HEAD"])
 def wechat_callback():
     print("[DEBUG] 收到请求:", request.method, request.args)
     msg_signature = request.args.get("msg_signature", "")
