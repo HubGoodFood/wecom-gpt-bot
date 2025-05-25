@@ -64,6 +64,13 @@ def wechat_callback():
     timestamp = request.args.get("timestamp", "")
     nonce = request.args.get("nonce", "")
 
+    @app.route("/", methods=["GET", "POST", "HEAD"])
+def wechat_callback():
+    print("[DEBUG] 收到请求 method:", request.method)
+    msg_signature = request.args.get("msg_signature", "")
+    timestamp = request.args.get("timestamp", "")
+    nonce = request.args.get("nonce", "")
+
     try:
         if request.method == "GET":
             echostr = request.args.get("echostr", "")
@@ -72,18 +79,27 @@ def wechat_callback():
             return echo
 
         if request.method == "POST":
-            xml = request.data
-            xml_tree = ET.fromstring(xml)
+            print("[DEBUG] 收到 POST 请求")
+            raw_xml = request.data.decode(errors='ignore')
+            print("[DEBUG] 原始 XML:", raw_xml)
+
+            xml_tree = ET.fromstring(raw_xml)
             encrypt = xml_tree.find("Encrypt").text
+            print("[DEBUG] 提取 Encrypt:", encrypt)
+
             decrypted_xml = cryptor.decrypt(encrypt)
+            print("[DEBUG] 解密后 XML:", decrypted_xml)
+
             msg = xmltodict.parse(decrypted_xml)["xml"]
+            print("[DEBUG] 解析后的字段:", msg)
+
             content = msg.get("Content")
             from_user = msg.get("FromUserName")
             to_user = msg.get("ToUserName")
 
-            print("[DEBUG] 收到微信消息:", content)
+            print("[DEBUG] 收到微信消息内容:", content)
 
-            # 固定测试回复内容
+            # 固定回复测试
             reply = "你好，我是果蔬客服机器人（测试中）"
 
             reply_xml = f"""<xml>
@@ -106,8 +122,9 @@ def wechat_callback():
             return "", 200
 
     except Exception as e:
-        print("[ERROR]", e)
+        print("[ERROR]", str(e))
         return "error", 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
