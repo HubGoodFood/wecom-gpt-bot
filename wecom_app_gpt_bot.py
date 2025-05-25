@@ -95,7 +95,10 @@ def wechat_callback():
             content = msg.get("Content")
             from_user = msg.get("FromUserName")
             to_user = msg.get("ToUserName")
-            reply = ask_gpt(content)
+#            reply = ask_gpt(content)
+            print("[DEBUG] 收到微信消息:", content)
+
+            reply = "你好，我是果蔬客服机器人（测试中）"
             reply_xml = f"""<xml>
   <ToUserName><![CDATA[{from_user}]]></ToUserName>
   <FromUserName><![CDATA[{to_user}]]></FromUserName>
