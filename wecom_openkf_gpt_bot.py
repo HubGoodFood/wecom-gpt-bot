@@ -59,7 +59,11 @@ def wechat_kf_callback():
 
     raw_msg = request.data
     msg = crypto.decrypt_message(raw_msg, msg_signature, timestamp, nonce)
+    if not msg.strip():
+        logging.error("❌ 解密失败，空消息内容")
+        return "ok"
     msg_json = json.loads(msg)
+
 
     open_kfid = msg_json.get("OpenKfId")
     if msg_json.get("MsgType") == "event":
