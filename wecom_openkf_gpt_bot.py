@@ -1,142 +1,121 @@
-
 import os
 import json
-import time
-import hashlib
-import traceback
-from flask import Flask, request
-from dotenv import load_dotenv
+import logging
+from flask import Flask, request, abort
+from wechatpy.utils import check_signature
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.client import WeChatClient
-import requests
-import xmltodict
+from wechatpy.exceptions import WeChatClientException
+from openai import OpenAI
 
-print("💡 当前使用的 CORPID:", os.getenv("CORPID"))
-print("💡 当前使用的 SECRET:", os.getenv("SECRET"))
-
-load_dotenv()
-
-TOKEN = os.getenv("TOKEN")
-ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
+# ==== 环境变量 ====
 CORPID = os.getenv("CORPID")
 SECRET = os.getenv("SECRET")
+TOKEN = os.getenv("TOKEN")
+AES_KEY = os.getenv("ENCODING_AES_KEY")
 OPEN_KFID = os.getenv("OPEN_KFID")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = Flask(__name__)
-crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
+# ==== 初始化 ====
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 client = WeChatClient(CORPID, SECRET)
+crypto = WeChatCrypto(TOKEN, AES_KEY, CORPID)
 
-# 消息缓存避免重复回答
-message_cache = {}
-
-def get_cached_response(user_id, content):
-    key = f"{user_id}:{hashlib.md5(content.encode()).hexdigest()}"
-    entry = message_cache.get(key)
-    if entry and time.time() - entry["timestamp"] < 300:
-        return entry["reply"]
-    return None
-
-def cache_response(user_id, content, reply):
-    key = f"{user_id}:{hashlib.md5(content.encode()).hexdigest()}"
-    message_cache[key] = {"reply": reply, "timestamp": time.time()}
-
-def ask_gpt(question):
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-3.5-turbo",
-        "temperature": 0.3,
-        "messages": [
-            {
-                "role": "system",
-                "content": """
-你是一个中文果蔬商店的智能客服，以下是你售卖的商品清单（价格为单位售价）：
-- 菠菜: $5 / 2磅
-- 土豆: $8 / 1袋
-- 玉米: $9 / 4根
-- 素食鸡: $20 / 1只
-- 鸡蛋: $13 / 1打
-
-你的职责：
-1. 回答用户关于价格、购买方式、产品数量等问题。
-2. 遇到模糊提问（如“你们卖什么”、“怎么买”）要主动介绍商品和服务。
-3. 遇到打招呼（如“你好”、“在吗”）仅回复一次问候语“你好，请问有什么可以帮助您的呢？”，不要重复发送。
-4. 如果用户提到未列出的商品，回复“目前没有此商品”，并推荐已有商品。
-5. 回复请简洁明了，直接说结果，避免多余寒暄。
-"""
-            },
-            {"role": "user", "content": question}
-        ]
-    }
-    response = requests.post(url, headers=headers, json=data)
-    return response.json()["choices"][0]["message"]["content"]
+# ==== Flask 应用 ====
+app = Flask(__name__)
 
 @app.route("/wechat_kf_callback", methods=["GET", "POST"])
-def wechat_kf():
+def wechat_kf_callback():
     if request.method == "GET":
+        # 微信服务器验证 URL
         msg_signature = request.args.get("msg_signature")
         timestamp = request.args.get("timestamp")
         nonce = request.args.get("nonce")
         echostr = request.args.get("echostr")
-        if crypto.check_signature(msg_signature, timestamp, nonce):
-            return crypto.decrypt(echostr)
-        else:
-            return "invalid signature", 403
+        try:
+            echo = crypto.check_signature(msg_signature, timestamp, nonce, echostr)
+            return echo
+        except Exception as e:
+            logger.error(f"验证失败: {e}")
+            abort(403)
 
+    # POST: 接收消息
+    msg_signature = request.args.get("msg_signature")
+    timestamp = request.args.get("timestamp")
+    nonce = request.args.get("nonce")
+
+    raw_xml = request.data
     try:
-        msg_signature = request.args["msg_signature"]
-        timestamp = request.args["timestamp"]
-        nonce = request.args["nonce"]
-        encrypted_xml = request.data
-        msg = crypto.decrypt_message(encrypted_xml, msg_signature, timestamp, nonce)
-        msg_json = xml_to_json(msg)
-        from_user = msg_json.get("FromUserName")
-        print("📥 解密成功 XML -> JSON:", msg_json)
-
-        if msg_json.get("MsgType") == "event" and msg_json.get("Event") == "kf_msg_or_event":
-            fetch_and_respond(from_user)
-        return "success"
+        decrypted_xml = crypto.decrypt_message(raw_xml, msg_signature, timestamp, nonce)
+        msg_json = json.loads(json.dumps(decrypted_xml))
+        logger.info(f"📥 解密后 XML: {decrypted_xml}")
     except Exception as e:
-        print("❌ 回调处理失败:")
-        traceback.print_exc()
-        return "error", 500
+        logger.error(f"❌ 解密失败: {e}")
+        abort(400)
 
-def fetch_and_respond(openid):
+    # 获取 open_kfid
+    open_kfid = msg_json.get("OpenKfId")
+
+    # 拉取消息并回复
     try:
-        res = client.get("/cgi-bin/kf/sync_msg", params={"cursor": "", "token": client.access_token})
-        for msg in res.get("msg_list", []):
-            if msg.get("msgtype") != "text" or "text" not in msg:
-                continue
-            content = msg["text"]["content"]
-            cached = get_cached_response(openid, content)
-            if cached:
-                print("⚠️ 忽略重复内容")
-                return
-            print("💬 收到内容:", content)
-            reply = ask_gpt(content)
-            print("📤 回复内容:", reply)
-            cache_response(openid, content, reply)
-            client.post("/cgi-bin/kf/send_msg", data=json.dumps({
-                "touser": openid,
-                "msgtype": "text",
-                "text": {"content": reply},
-                "open_kfid": OPEN_KFID
-            }))
+        fetch_and_respond(open_kfid)
     except Exception as e:
-        print("❌ 拉取处理消息失败:")
-        traceback.print_exc()
+        logger.error(f"❌ 回调处理失败: {e}")
+        abort(500)
 
-def xml_to_json(xml_str):
-    return json.loads(json.dumps(xmltodict.parse(xml_str)["xml"]))
+    return "success"
+
+def fetch_and_respond(open_kfid):
+    access_token = client.access_token
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token={access_token}"
+    payload = {
+        "cursor": "",
+        "token": access_token,
+        "open_kfid": open_kfid,
+    }
+    res = client.session.post(url, data=json.dumps(payload))
+    res_json = res.json()
+    logger.info(f"🧾 拉取消息响应: {res_json}")
+
+    msg_list = res_json.get("msg_list", [])
+    for msg in msg_list:
+        if msg.get("msgtype") == "text":
+            external_userid = msg.get("external_userid")
+            user_msg = msg["text"]["content"]
+            logger.info(f"💬 用户 [{external_userid}] 发来: {user_msg}")
+
+            # 调用 OpenAI 回复
+            reply = ask_gpt(user_msg)
+            send_msg(open_kfid, external_userid, reply)
+
+def ask_gpt(query):
+    messages = [
+        {"role": "system", "content": "你是一个中文果蔬商店的智能客服，以下是你售卖的商品清单（价格为单位售价）：\n- 菠菜: $5 / 2磅\n- 土豆: $8 / 1袋\n- 玉米: $9 / 4根\n- 素食鸡: $20 / 1只\n- 鸡蛋: $13 / 1打\n\n你的职责：\n1. 回答用户关于价格、购买方式、产品数量等问题。\n2. 遇到模糊提问（如“你们卖什么”、“怎么买”）要主动介绍商品和服务。\n3. 遇到打招呼（如“你好”、“在吗”）仅回复一次问候语“你好，请问有什么可以帮助您的呢？”，不要重复发送。\n4. 如果用户提到未列出的商品，回复“目前没有此商品”，并推荐已有商品。\n5. 回复请简洁明了，直接说结果，避免多余寒暄。"},
+        {"role": "user", "content": query}
+    ]
+    response = openai_client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.3,
+    )
+    return response.choices[0].message.content
+
+def send_msg(open_kfid, external_userid, content):
+    access_token = client.access_token
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token={access_token}"
+    payload = {
+        "touser": external_userid,
+        "open_kfid": open_kfid,
+        "msgtype": "text",
+        "text": {
+            "content": content
+        }
+    }
+    res = client.session.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+    logger.info(f"📤 微信发送结果: {res.json()}")
 
 if __name__ == "__main__":
-    try:
-        ip = requests.get("https://api.ipify.org").text
-        print("🌍 当前公网 IP:", ip)
-    except:
-        pass
-    app.run(host="0.0.0.0", port=10000, debug=True)
+    app.run(host="0.0.0.0", port=10000)
