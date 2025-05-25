@@ -39,6 +39,8 @@ def wechat_callback():
             timestamp = request.args.get("timestamp")
             nonce = request.args.get("nonce")
             echostr = request.args.get("echostr")
+            if not echostr:
+                return "pong", 200  # 处理浏览器直接访问 /
             echo = crypto.decrypt_message(echostr, msg_signature, timestamp, nonce)
             return make_response(echo)
         except Exception as e:
