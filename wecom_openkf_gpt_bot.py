@@ -51,17 +51,17 @@ def wechat_kf_callback():
     try:
         decrypted_xml = crypto.decrypt_message(encrypt, signature, timestamp, nonce)
         logger.info(f"📥 解密后 XML: {decrypted_xml}")
-
-        # ✅ 修复：将 XML 字符串解析为 Python 字典
+    
+        # 解析 XML 字符串为字典
         msg_dict = xmltodict.parse(decrypted_xml)
         msg_json = msg_dict["xml"]
     
-    # 然后再取字段
-    open_kfid = msg_json.get("OpenKfId")
-
-    # 拉取消息并回复
-    try:
+        # 获取 open_kfid
+        open_kfid = msg_json.get("OpenKfId")
+    
+        # 拉取消息并回复
         fetch_and_respond(open_kfid)
+    
     except Exception as e:
         logger.error(f"❌ 回调处理失败: {e}")
         abort(500)
