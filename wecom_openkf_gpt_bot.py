@@ -3,6 +3,7 @@ import os
 import json
 import time
 import hashlib
+import traceback
 from flask import Flask, request
 from dotenv import load_dotenv
 from wechatpy.enterprise.crypto import WeChatCrypto
@@ -93,6 +94,7 @@ def wechat_kf():
         return "success"
     except Exception as e:
         print("❌ 回调处理失败:", e)
+        traceback.print_exc()  # 添加这一行，打印完整错误栈
         return "error", 500
 
 def fetch_and_respond(openid):
