@@ -7,7 +7,7 @@ from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.utils import to_text
 from wechatpy import parse_message
 from wechatpy.replies import create_reply
-import openai
+from openai import OpenAI
 
 # 配置日志
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -26,7 +26,8 @@ CORPID = os.getenv("CORPID")
 AGENT_ID = os.getenv("AGENT_ID")
 AGENT_SECRET = os.getenv("AGENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+
+openai = OpenAI(api_key=OPENAI_API_KEY)
 
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
 app = Flask(__name__)
@@ -52,7 +53,7 @@ def query_with_gpt(user_input):
     prompt = f"我有以下果蔬商品价格清单：\n" + "\n".join([f"{k}: {v}" for k, v in PRODUCTS.items()]) + \
              f"\n请根据这个清单回答用户问题：\n用户：{user_input}\n回复："
     try:
-        response = openai.ChatCompletion.create(
+        chat_completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "user", "content": prompt}
@@ -60,7 +61,7 @@ def query_with_gpt(user_input):
             temperature=0.4,
             max_tokens=100
         )
-        return response.choices[0].message.content.strip()
+        return chat_completion.choices[0].message.content.strip()
     except Exception as e:
         logging.error("❌ GPT 请求失败: %s", str(e))
         return "当前查询人数过多，请稍后再试。"
