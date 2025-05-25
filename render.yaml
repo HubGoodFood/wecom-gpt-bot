@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: wecom-gpt-bot
+    env: python
+    buildCommand: ""
+    startCommand: python3 wecom_app_gpt_bot.py
+    plan: free
+    envVars:
+      - key: FLASK_ENV
+        value: production
