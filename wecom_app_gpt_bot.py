@@ -114,6 +114,10 @@ def wechat_callback():
   <Nonce><![CDATA[{nonce}]]></Nonce>
 </xml>"""
             return response, 200, {"Content-Type": "application/xml"}
+
+    elif request.method == "HEAD":
+            return "", 200
+
     except Exception as e:
         print("[ERROR]", e)
         return "error", 500
