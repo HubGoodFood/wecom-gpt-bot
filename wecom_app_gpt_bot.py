@@ -111,4 +111,5 @@ def wechat_callback():
         return "error", 500
 
 if __name__ == "__main__":
+    print("✅ Flask 服务已启动（来自最新版代码）")
     app.run(host="0.0.0.0", port=10000)
