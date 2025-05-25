@@ -56,8 +56,8 @@ def wechat_kf_callback():
         msg_dict = xmltodict.parse(decrypted_xml)
         msg_json = msg_dict["xml"]
     
-        # 然后再取字段
-        open_kfid = msg_json.get("OpenKfId")
+    # 然后再取字段
+    open_kfid = msg_json.get("OpenKfId")
 
     # 拉取消息并回复
     try:
