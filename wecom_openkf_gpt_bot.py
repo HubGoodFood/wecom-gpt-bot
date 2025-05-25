@@ -49,15 +49,15 @@ def wechat_kf_callback():
 
     raw_xml = request.data
     try:
-        decrypted_xml = crypto.decrypt_message(raw_xml, msg_signature, timestamp, nonce)
-        msg_json = json.loads(json.dumps(decrypted_xml))
+        decrypted_xml = crypto.decrypt_message(encrypt, signature, timestamp, nonce)
         logger.info(f"📥 解密后 XML: {decrypted_xml}")
-    except Exception as e:
-        logger.error(f"❌ 解密失败: {e}")
-        abort(400)
 
-    # 获取 open_kfid
-    open_kfid = msg_json.get("OpenKfId")
+        # ✅ 修复：将 XML 字符串解析为 Python 字典
+        msg_dict = xmltodict.parse(decrypted_xml)
+        msg_json = msg_dict["xml"]
+    
+        # 然后再取字段
+        open_kfid = msg_json.get("OpenKfId")
 
     # 拉取消息并回复
     try:
