@@ -25,14 +25,14 @@ ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
 CORPID = os.getenv("CORPID")
 AGENT_ID = os.getenv("AGENT_ID")
 AGENT_SECRET = os.getenv("AGENT_SECRET")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY").replace("\\n", "").strip()
 
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
 app = Flask(__name__)
 
-# 示例商品清单（你可以替换为真实数据）
+# 商品清单
 PRODUCTS = {
     "菠菜": {"price": 5, "unit": "2磅"},
     "土豆": {"price": 8, "unit": "1袋"},
@@ -50,19 +50,30 @@ def query_product_price(query):
 
 
 def query_with_gpt(user_input):
-    prompt = f"你是一个熟悉果蔬商品价格的客服助手。以下是你拥有的商品价格：\n"
+    system_prompt = (
+        "你是一个智能果蔬客服助手，负责回答用户关于商品价格的问题。\n"
+        "你拥有以下商品清单（价格为单位售价）：\n"
+    )
     for k, v in PRODUCTS.items():
-        prompt += f"{k}: ${v['price']} / {v['unit']}\n"
-    prompt += f"\n请根据上面商品清单智能回答用户问题，包括单位换算、总价计算、识别数量、以及推荐现有商品替代缺货内容。\n"
-    prompt += f"用户问题：{user_input}\n回答："
+        system_prompt += f"- {k}: ${v['price']} / {v['unit']}\n"
+    system_prompt += (
+        "\n你的目标：\n"
+        "1. **识别用户是否在查询单个商品价格**，如果是，直接回复该商品价格。\n"
+        "2. **识别用户是否在询问多个商品的总价**，提取数量和单位并计算总价。\n"
+        "3. **支持灵活单位表达**，包括：斤、磅、袋、根、个、打 等混合单位；识别多袋（如“2袋”“两袋”）。\n"
+        "4. **用户提到未在清单中的商品**，要礼貌回复“目前没有此商品”，并列出可选商品。\n"
+        "5. **支持模糊提问**，如“加起来多少钱”“能买3磅吗”等模糊表达，智能理解意图。"
+    )
+
     try:
         chat_completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input}
             ],
             temperature=0.4,
-            max_tokens=150
+            max_tokens=200
         )
         return chat_completion.choices[0].message.content.strip()
     except Exception as e:
@@ -102,7 +113,6 @@ def wechat_callback():
             parsed = parse_message(msg)
             logging.info("🧾 用户发来内容: %s", parsed.content)
 
-            # 优先查询本地商品
             user_query = parsed.content.strip()
             reply_text = query_product_price(user_query)
             if not reply_text:
