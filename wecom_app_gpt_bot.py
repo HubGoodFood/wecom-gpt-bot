@@ -103,7 +103,11 @@ def wechat_callback():
             return "", 200
 
     except Exception as e:
-        print("[ERROR]", str(e))
+        print("[ERROR] 捕获异常:", str(e))
+        try:
+            print("[ERROR] 原始 XML:", request.data.decode(errors='ignore'))
+        except:
+            pass
         return "error", 500
 
 if __name__ == "__main__":
