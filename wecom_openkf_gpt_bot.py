@@ -125,4 +125,4 @@ if __name__ == "__main__":
         print("🌍 当前公网 IP:", ip)
     except:
         pass
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=10000, debug=True)
