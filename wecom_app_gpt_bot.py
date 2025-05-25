@@ -11,6 +11,8 @@ from openai import OpenAI
 
 # 配置日志
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.debug("🔑 API key prefix: %s", OPENAI_API_KEY[:10])
+logging.debug("🔑 API key length: %d", len(OPENAI_API_KEY))
 
 # 显示公网 IP
 try:
@@ -25,7 +27,7 @@ ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
 CORPID = os.getenv("CORPID")
 AGENT_ID = os.getenv("AGENT_ID")
 AGENT_SECRET = os.getenv("AGENT_SECRET")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY").replace("\\n", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").replace("\\n", "").strip()
 
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -50,35 +52,36 @@ def query_product_price(query):
 
 
 def query_with_gpt(user_input):
-    system_prompt = (
-        "你是一个智能果蔬客服助手，负责回答用户关于商品价格的问题。\n"
-        "你拥有以下商品清单（价格为单位售价）：\n"
-    )
-    for k, v in PRODUCTS.items():
-        system_prompt += f"- {k}: ${v['price']} / {v['unit']}\n"
-    system_prompt += (
-        "\n你的目标：\n"
-        "1. **识别用户是否在查询单个商品价格**，如果是，直接回复该商品价格。\n"
-        "2. **识别用户是否在询问多个商品的总价**，提取数量和单位并计算总价。\n"
-        "3. **支持灵活单位表达**，包括：斤、磅、袋、根、个、打 等混合单位；识别多袋（如“2袋”“两袋”）。\n"
-        "4. **用户提到未在清单中的商品**，要礼貌回复“目前没有此商品”，并列出可选商品。\n"
-        "5. **支持模糊提问**，如“加起来多少钱”“能买3磅吗”等模糊表达，智能理解意图。"
-    )
+    product_list = "\n".join([f"- {k}: ${v['price']} / {v['unit']}" for k, v in PRODUCTS.items()])
+    system_prompt = f"""
+你是一个智能果蔬客服助手，负责回答用户关于商品价格的问题。
+
+你拥有以下商品清单（价格为单位售价）：
+{product_list}
+
+你的目标：
+1. 识别用户是否在查询单个商品价格，如果是，直接回复该商品价格。
+2. 识别用户是否在询问多个商品的总价，提取每个商品及数量，并计算总价。
+3. 支持灵活单位表达，包括：斤、磅、袋、根、个、打，能理解如“4磅菠菜”“两袋土豆”。
+4. 用户提到未在清单中的商品，要回复“目前没有此商品”，并推荐已有商品。
+5. 支持模糊提问，如“加起来多少钱”“一共多少钱”等。
+6. 回复中应直接输出价格计算结果，简洁明了。
+"""
 
     try:
-        chat_completion = openai.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            temperature=0.4,
-            max_tokens=200
+            temperature=0.3,
+            max_tokens=300
         )
-        return chat_completion.choices[0].message.content.strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error("❌ GPT 请求失败: %s", str(e))
-        return "当前查询人数过多，请稍后再试。"
+        return "很抱歉，系统繁忙，请稍后再试。"
 
 
 @app.route("/", methods=["GET", "POST", "HEAD"])
@@ -126,6 +129,7 @@ def wechat_callback():
             return "fail", 500
 
     return "OK", 200
+
 
 if __name__ == "__main__":
     print("✅ 启动完整客服版本 Flask 成功")
