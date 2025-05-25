@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import requests
+import re
 from flask import Flask, request, make_response
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.utils import to_text
@@ -34,24 +35,59 @@ app = Flask(__name__)
 
 # 示例商品清单（你可以替换为真实数据）
 PRODUCTS = {
-    "菠菜": "$5 / 2磅",
-    "土豆": "$8 / 1袋",
-    "玉米": "$9 / 4根",
-    "素食鸡": "$20 / 1只",
-    "鸡蛋": "$13 / 1打"
+    "菠菜": {"price": 5, "unit": "2磅"},
+    "土豆": {"price": 8, "unit": "1袋"},
+    "玉米": {"price": 9, "unit": "4根"},
+    "素食鸡": {"price": 20, "unit": "1只"},
+    "鸡蛋": {"price": 13, "unit": "1打"}
 }
 
+RECOMMENDATION_TAGS = {
+    "老人": ["菠菜", "玉米"],
+    "便宜": ["土豆", "菠菜"],
+    "营养": ["鸡蛋", "素食鸡"]
+}
+
+UNIT_MAP = {
+    "磅": 1,
+    "袋": 1,
+    "根": 1,
+    "打": 1,
+    "只": 1,
+    "斤": 0.5,
+    "半": 0.5
+}
 
 def query_product_price(query):
-    for name, price in PRODUCTS.items():
+    for name, info in PRODUCTS.items():
         if name in query:
-            return f"{name} 的价格是 {price}"
+            return f"{name} 的价格是 ${info['price']} / {info['unit']}"
     return None
 
+def extract_units_and_calc(query):
+    total = 0.0
+    found = False
+    for name, info in PRODUCTS.items():
+        pattern = rf"(\\d+(\\.\\d+)?|半)?(磅|袋|打|只|根)?{name}"
+        match = re.search(pattern, query)
+        if match:
+            qty_str = match.group(1)
+            unit = match.group(3) or info['unit'][-1]
+            qty = float(qty_str) if qty_str and qty_str != '半' else 0.5 if qty_str == '半' else 1
+            price = info['price']
+            total += price * qty
+            found = True
+    return f"总价格约为 ${total:.2f}" if found else None
+
+def recommend_products(query):
+    for tag, items in RECOMMENDATION_TAGS.items():
+        if tag in query:
+            return f"推荐商品：{', '.join(items)}"
+    return None
 
 def query_with_gpt(user_input):
-    prompt = f"我有以下果蔬商品价格清单：\n" + "\n".join([f"{k}: {v}" for k, v in PRODUCTS.items()]) + \
-             f"\n请根据这个清单回答用户问题：\n用户：{user_input}\n回复："
+    product_desc = "\n".join([f"{k}: ${v['price']} / {v['unit']}" for k, v in PRODUCTS.items()])
+    prompt = f"我有以下果蔬商品价格清单：\n{product_desc}\n请根据这个清单回答用户问题：\n用户：{user_input}\n回复："
     try:
         chat_completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -65,7 +101,6 @@ def query_with_gpt(user_input):
     except Exception as e:
         logging.error("❌ GPT 请求失败: %s", str(e))
         return "当前查询人数过多，请稍后再试。"
-
 
 @app.route("/", methods=["GET", "POST", "HEAD"])
 def wechat_callback():
@@ -99,11 +134,13 @@ def wechat_callback():
             parsed = parse_message(msg)
             logging.info("🧾 用户发来内容: %s", parsed.content)
 
-            # 优先查询本地商品
             user_query = parsed.content.strip()
-            reply_text = query_product_price(user_query)
-            if not reply_text:
-                reply_text = query_with_gpt(user_query)
+            reply_text = (
+                query_product_price(user_query)
+                or extract_units_and_calc(user_query)
+                or recommend_products(user_query)
+                or query_with_gpt(user_query)
+            )
 
             reply_xml = create_reply(reply_text, message=parsed)
             encrypted = crypto.encrypt_message(to_text(reply_xml), nonce, timestamp)
