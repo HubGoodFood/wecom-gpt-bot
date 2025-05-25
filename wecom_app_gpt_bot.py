@@ -7,6 +7,7 @@ from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.utils import to_text
 from wechatpy import parse_message
 from wechatpy.replies import create_reply
+import openai
 
 # 配置日志
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -14,19 +15,56 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 # 显示公网 IP
 try:
     public_ip = requests.get("https://api.ipify.org").text
-    logging.info("🌐 当前服务器公网 IP: %s", public_ip)
+    logging.info("\U0001F310 当前服务器公网 IP: %s", public_ip)
 except Exception as e:
     logging.error("❌ 获取公网 IP 失败: %s", str(e))
 
-# 从环境变量中读取配置
+# 读取配置
 TOKEN = os.getenv("TOKEN")
 ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
 CORPID = os.getenv("CORPID")
 AGENT_ID = os.getenv("AGENT_ID")
 AGENT_SECRET = os.getenv("AGENT_SECRET")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
 
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
 app = Flask(__name__)
+
+# 示例商品清单（你可以替换为真实数据）
+PRODUCTS = {
+    "菠菜": "$5 / 2磅",
+    "土豆": "$8 / 1袋",
+    "玉米": "$9 / 4根",
+    "素食鸡": "$20 / 1只",
+    "鸡蛋": "$13 / 1打"
+}
+
+
+def query_product_price(query):
+    for name, price in PRODUCTS.items():
+        if name in query:
+            return f"{name} 的价格是 {price}"
+    return None
+
+
+def query_with_gpt(user_input):
+    prompt = f"我有以下果蔬商品价格清单：\n" + "\n".join([f"{k}: {v}" for k, v in PRODUCTS.items()]) + \
+             f"\n请根据这个清单回答用户问题：\n用户：{user_input}\n回复："
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4,
+            max_tokens=100
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error("❌ GPT 请求失败: %s", str(e))
+        return "当前查询人数过多，请稍后再试。"
+
 
 @app.route("/", methods=["GET", "POST", "HEAD"])
 def wechat_callback():
@@ -40,7 +78,7 @@ def wechat_callback():
             nonce = request.args.get("nonce")
             echostr = request.args.get("echostr")
             if not echostr:
-                return "pong", 200  # 处理浏览器直接访问 /
+                return "pong", 200
             echo = crypto.decrypt_message(echostr, msg_signature, timestamp, nonce)
             return make_response(echo)
         except Exception as e:
@@ -60,7 +98,12 @@ def wechat_callback():
             parsed = parse_message(msg)
             logging.info("🧾 用户发来内容: %s", parsed.content)
 
-            reply_text = "您好，感谢您的消息！"
+            # 优先查询本地商品
+            user_query = parsed.content.strip()
+            reply_text = query_product_price(user_query)
+            if not reply_text:
+                reply_text = query_with_gpt(user_query)
+
             reply_xml = create_reply(reply_text, message=parsed)
             encrypted = crypto.encrypt_message(to_text(reply_xml), nonce, timestamp)
             return make_response(encrypted)
