@@ -8,11 +8,14 @@ from dotenv import load_dotenv
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.client import WeChatClient # client 实例创建了但未在后续代码中使用
 # from wechatpy.client.api import WeChatMessage # WeChatMessage 未使用
+from flask import request, Flask
 import requests
 import xmltodict # 添加缺失的导入
 import openai # 添加缺失的导入
 
 load_dotenv()
+
+app = Flask(__name__)
 
 TOKEN = os.getenv("TOKEN")
 ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
@@ -87,8 +90,12 @@ def ask_gpt(question):
         return "抱歉，理解您的意思时遇到点问题，可以换个方式问吗？"
 
 
-@app.route("/wechat_kf_callback", methods=["POST"]) # 这个版本只处理 POST
+@app.route("/wechat_kf_callback", methods=["GET", "POST"])
 def wechat_kf():
+    if request.method == "GET":
+        # 企业微信 GET 验证回调地址
+        echostr = request.args.get("echostr", "")
+        return echostr
     try:
         msg_signature = request.args.get("msg_signature")
         timestamp = request.args.get("timestamp")
