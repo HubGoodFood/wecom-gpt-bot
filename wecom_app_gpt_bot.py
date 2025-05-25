@@ -59,6 +59,7 @@ cryptor = WXBizMsgCrypt(TOKEN, ENCODING_AES_KEY, CORPID)
 
 @app.route("/", methods=["GET", "POST", "HEAD"])
 def wechat_callback():
+    print("🚨 wechat_callback 被触发")
     print("[DEBUG] 收到请求 method:", request.method)
     msg_signature = request.args.get("msg_signature", "")
     timestamp = request.args.get("timestamp", "")
