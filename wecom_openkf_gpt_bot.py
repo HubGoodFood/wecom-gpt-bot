@@ -6,7 +6,7 @@ import requests
 from flask import Flask, request, make_response
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.enterprise import WeChatClient
-from wechatpy.xml import parse_message
+from wechatpy import parse_message
 import openai
 
 # 日志设置
