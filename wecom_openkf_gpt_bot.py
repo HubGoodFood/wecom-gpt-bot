@@ -111,6 +111,7 @@ def wechat_kf_callback():
             logging.info("📦 接收到加密 XML: %s", xml.decode("utf-8"))
 
             decrypted = crypto.decrypt_message(xml, msg_signature, timestamp, nonce)
+            logging.info("🧾 解密后原始 XML:\n%s", decrypted)
             msg = parse_message(decrypted)
             logging.info("💬 消息类型: %s", type(msg).__name__)
             user_id = msg.source
