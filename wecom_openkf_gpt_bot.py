@@ -11,6 +11,9 @@ from wechatpy.client import WeChatClient
 import requests
 import xmltodict
 
+print("💡 当前使用的 CORPID:", os.getenv("CORPID"))
+print("💡 当前使用的 SECRET:", os.getenv("SECRET"))
+
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
