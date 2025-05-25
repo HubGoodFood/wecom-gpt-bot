@@ -27,13 +27,13 @@ AGENT_ID = os.getenv("AGENT_ID")
 AGENT_SECRET = os.getenv("AGENT_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").replace("\\n", "").strip()
 
+logging.debug("🔑 API key prefix: %s", OPENAI_API_KEY[:10])
+logging.debug("🔑 API key length: %d", len(OPENAI_API_KEY))
+
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
 app = Flask(__name__)
-
-logging.debug("🔑 API key prefix: %s", OPENAI_API_KEY[:10])
-logging.debug("🔑 API key length: %d", len(OPENAI_API_KEY))
 
 # 商品清单
 PRODUCTS = {
@@ -44,13 +44,23 @@ PRODUCTS = {
     "鸡蛋": {"price": 13, "unit": "1打"},
 }
 
+# 中文触发 GPT 的关键词
+GPT_KEYWORDS = ["几", "多", "总共", "一共", "加起来", "多少", "需要", "要", "斤", "磅", "袋", "根", "个", "打"]
+
+def should_use_gpt(query):
+    # 多商品 + 单位/数量 + 问价 触发 GPT
+    count = sum(1 for name in PRODUCTS if name in query)
+    if count > 1:
+        return True
+    if any(k in query for k in GPT_KEYWORDS):
+        return True
+    return False
 
 def query_product_price(query):
     for name, item in PRODUCTS.items():
-        if name in query:
+        if name in query and not should_use_gpt(query):
             return f"{name} 的价格是 ${item['price']} / {item['unit']}"
     return None
-
 
 def query_with_gpt(user_input):
     product_list = "\n".join([f"- {k}: ${v['price']} / {v['unit']}" for k, v in PRODUCTS.items()])
@@ -67,6 +77,7 @@ def query_with_gpt(user_input):
 4. 用户提到未在清单中的商品，要回复“目前没有此商品”，并推荐已有商品。
 5. 支持模糊提问，如“加起来多少钱”“一共多少钱”等。
 6. 回复中应直接输出价格计算结果，简洁明了。
+7. 识别中英文表达均可。
 """
 
     try:
