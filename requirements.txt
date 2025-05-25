@@ -4,4 +4,4 @@ python-dotenv
 pycryptodome
 xmltodict
 wechatpy>=1.8.9
-openai
+openai>=1.0.0
