@@ -5,7 +5,8 @@ import requests
 from flask import Flask, request, make_response
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.utils import to_text
-from wechatpy.xml import parse_message, create_reply_message
+from wechatpy import parse_message
+from wechatpy.replies import create_reply
 
 # 配置日志
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -58,7 +59,7 @@ def wechat_callback():
             logging.info("🧾 用户发来内容: %s", parsed.content)
 
             reply_text = "您好，感谢您的消息！"
-            reply_xml = create_reply_message(reply_text, parsed)
+            reply_xml = create_reply(reply_text, message=parsed)
             encrypted = crypto.encrypt_message(to_text(reply_xml), nonce, timestamp)
             return make_response(encrypted)
         except Exception as e:
