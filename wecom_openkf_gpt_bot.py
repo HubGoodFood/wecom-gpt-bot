@@ -100,7 +100,8 @@ def wechat_kf():
         msg_signature = request.args.get("msg_signature")
         timestamp = request.args.get("timestamp")
         nonce = request.args.get("nonce")
-        echostr = request.args.get("echostr")
+        echostr = request.args.get("echostr", "")
+        return echostr
 
         if not all([msg_signature, timestamp, nonce, echostr]):
             print("❌ GET 请求缺少参数 (wechat_kf)")
