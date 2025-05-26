@@ -1,36 +1,33 @@
 import os
-import json # json 导入了但未在您提供的这个版本中使用，可以考虑移除
+# import json # json 导入了但未在您提供的这个版本中使用，可以考虑移除
 import time
 import hashlib
 import traceback # 确保导入 traceback
-from flask import Flask, request
+from flask import Flask, request, abort # 引入 abort
 from dotenv import load_dotenv
 from wechatpy.enterprise.crypto import WeChatCrypto
-from wechatpy.client import WeChatClient # client 实例创建了但未在后续代码中使用
+# from wechatpy.client import WeChatClient # client 实例创建了但未在后续代码中使用
 # from wechatpy.client.api import WeChatMessage # WeChatMessage 未使用
-from flask import request, Flask
 import requests
-import xmltodict # 添加缺失的导入
-import openai # 添加缺失的导入
+import xmltodict
+import openai
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__) # 保留一个 Flask app 初始化
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("TOKEN") # 用于回调验证和消息加解密的 Token
 ENCODING_AES_KEY = os.getenv("ENCODING_AES_KEY")
 CORPID = os.getenv("CORPID")
-SECRET = os.getenv("SECRET")
-OPEN_KFID = os.getenv("OPEN_KFID") # 您的企业微信客服ID
+SECRET = os.getenv("SECRET") # 用于获取 access_token
+OPEN_KFID = os.getenv("OPEN_KFID") # 您配置的默认/主要的客服ID，可能被事件中的ID覆盖
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 确保 OpenAI API Key 已设置，如果 openai 库版本 >= 1.0.0
-# openai.api_key = OPENAI_API_KEY # 旧版用法
-# 或者 client_openai = openai.OpenAI(api_key=OPENAI_API_KEY) # 新版用法
+# 确保 OpenAI API Key 已设置
+# openai.api_key = OPENAI_API_KEY # 旧版用法，如果 openai 库版本 >= 1.0.0 通常会自动从环境变量读取
 
-app = Flask(__name__)
 crypto = WeChatCrypto(TOKEN, ENCODING_AES_KEY, CORPID)
-client = WeChatClient(CORPID, SECRET) # 此 client 实例未在代码中使用，请确认是否需要
+# client = WeChatClient(CORPID, SECRET) # 此 client 实例未在代码中使用，请确认是否需要
 
 # 消息缓存 (当前未被 fetch_and_respond 中的 GPT 调用所使用)
 message_cache = {}
@@ -87,8 +84,8 @@ def ask_gpt(question):
         return "抱歉，我现在无法连接到智能服务，请稍后再试。"
     except (KeyError, IndexError) as e:
         print(f"❌ 解析 OpenAI API 响应失败 (ask_gpt): {e}")
+        print(f"OpenAI 完整响应: {response.text if 'response' in locals() else 'N/A'}")
         return "抱歉，理解您的意思时遇到点问题，可以换个方式问吗？"
-
 
 @app.route("/wechat_kf_callback", methods=["GET", "POST"])
 def wechat_kf():
@@ -98,92 +95,147 @@ def wechat_kf():
         timestamp = request.args.get("timestamp")
         nonce = request.args.get("nonce")
         echostr = request.args.get("echostr")
-        return echostr  # 必须返回原样
-    try:
-        msg_signature = request.args.get("msg_signature")
-        timestamp = request.args.get("timestamp")
-        nonce = request.args.get("nonce")
-        encrypted_xml = request.data
 
-        if not all([msg_signature, timestamp, nonce, encrypted_xml]):
-            print("❌ POST 请求缺少参数或数据")
-            return "Missing POST parameters or data", 400
+        if not all([msg_signature, timestamp, nonce, echostr]):
+            print("❌ GET 请求缺少参数 (wechat_kf)")
+            return "Missing parameters for GET verification", 400
+        try:
+            # 使用wechatpy的crypto模块进行验证
+            decrypted_echostr = crypto.verify_url(msg_signature, timestamp, nonce, echostr)
+            print("✅ URL 验证成功 (wechat_kf)")
+            return decrypted_echostr # 必须返回解密后的 echostr 明文
+        except Exception as e:
+            print(f"❌ URL 验证失败 (wechat_kf): {e}")
+            traceback.print_exc()
+            return "Verification failed", 403
 
-        msg = crypto.decrypt_message(encrypted_xml, msg_signature, timestamp, nonce)
-        msg_dict = xmltodict.parse(msg) # 您日志中报错的行 (line 83)
-        msg_json = msg_dict["xml"]
+    elif request.method == "POST":
+        try:
+            msg_signature = request.args.get("msg_signature")
+            timestamp = request.args.get("timestamp")
+            nonce = request.args.get("nonce")
+            encrypted_xml = request.data
 
-        # openid = msg_json.get("FromUserName") # 这是用户的 external_userid
+            if not all([msg_signature, timestamp, nonce, encrypted_xml]):
+                print("❌ POST 请求缺少参数或数据 (wechat_kf)")
+                return "Missing POST parameters or data", 400
 
-        if (
-            msg_json.get("MsgType") == "event"
-            and msg_json.get("Event") == "kf_msg_or_event"
-        ):
-            print("ℹ️ 收到 kf_msg_or_event 事件, 开始处理...")
-            # 调用 fetch_and_respond 时使用配置的 OPEN_KFID
-            fetch_and_respond(OPEN_KFID)
-        
-        return "success"
-    except Exception as e:
-        print(f"❌ POST 回调处理失败 (wechat_kf): {e}")
-        traceback.print_exc() # 打印完整的错误堆栈信息
-        return "error", 500
-    # END OF wechat_kf FUNCTION - 确保原先在此之后的重复错误代码块已被删除
+            msg = crypto.decrypt_message(encrypted_xml, msg_signature, timestamp, nonce)
+            msg_dict = xmltodict.parse(msg)
+            msg_json = msg_dict["xml"] # 通常 msg_dict["xml"] 是消息主体
+
+            print(f"ℹ️ 收到解密的 POST 数据 (wechat_kf): {msg_json}")
+
+            if (
+                msg_json.get("MsgType") == "event"
+                and msg_json.get("Event") == "kf_msg_or_event"
+            ):
+                print("ℹ️ 收到 kf_msg_or_event 事件, 开始处理...")
+                # 从事件中获取 OpenKfId 和用于拉取消息的 Token
+                # !!! 注意：您需要根据文档 https://kf.weixin.qq.com/api/doc/path/94745 确认XML中这两个字段的确切名称
+                event_open_kfid = msg_json.get("OpenKfId") # 假设字段名为 OpenKfId
+                event_kf_token = msg_json.get("Token")    # 假设字段名为 Token (此Token用于sync_msg)
+
+                if not event_kf_token: # event_open_kfid 可能与全局 OPEN_KFID 一致或需要从事件中获取
+                    print("❌ kf_msg_or_event 事件中缺少 Token 字段 (wechat_kf)")
+                    # 根据业务逻辑决定是否返回错误，或者使用全局OPEN_KFID（如果event_open_kfid也为空）
+                    # 这里暂时使用全局的 OPEN_KFID 如果事件中没有提供，但 event_kf_token 是必需的
+                    target_kfid = event_open_kfid if event_open_kfid else OPEN_KFID
+                    if not event_kf_token: # 再次检查，因为 event_kf_token 很关键
+                        print("❌ 无法处理 kf_msg_or_event，因为事件中未提供 sync_msg 所需的 Token")
+                        return "success" # 仍然返回 success，避免微信重试，但记录错误
+                else:
+                    target_kfid = event_open_kfid if event_open_kfid else OPEN_KFID # 如果事件没给OpenKfId，用全局的
+                    fetch_and_respond(target_kfid, event_kf_token)
+            
+            return "success" # 异步处理，先回复微信服务器，避免重试
+        except Exception as e:
+            print(f"❌ POST 回调处理失败 (wechat_kf): {e}")
+            traceback.print_exc()
+            return "error", 500
+    else:
+        print(f"❌ 不支持的请求方法: {request.method} (wechat_kf)")
+        abort(405) # Method Not Allowed
+
 
 def get_wecom_access_token():
     try:
         corpid = os.getenv("CORPID")
         corpsecret = os.getenv("SECRET")
+        if not all([corpid, corpsecret]):
+            raise ValueError("CORPID 或 SECRET 环境变量未设置")
+
         url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corpid}&corpsecret={corpsecret}"
         res = requests.get(url).json()
-        if res.get("errcode") != 0 or "access_token" not in res: # 更严格的检查
+        if res.get("errcode") != 0 or "access_token" not in res:
             raise Exception(f"获取 access_token 失败: {res}")
-        return res["access_token"]
+        access_token = res["access_token"]
+        print("✅ 获取 access_token 成功")
+        return access_token
     except requests.exceptions.RequestException as e:
-        print(f"❌ 请求 access_token 网络错误: {e}")
-        raise # 将网络请求异常重新抛出，以便上层捕获
-    except Exception as e: # 捕获其他可能的错误
-        print(f"❌ 获取 access_token 未知错误: {e}")
-        raise # 将未知异常重新抛出
+        print(f"❌ 请求 access_token 网络错误 (get_wecom_access_token): {e}")
+        raise
+    except Exception as e:
+        print(f"❌ 获取 access_token 未知错误 (get_wecom_access_token): {e}")
+        traceback.print_exc() # 打印详细错误
+        raise
 
 
-def fetch_and_respond(open_kfid_to_sync): # 参数名修改以反映其用途
+def fetch_and_respond(target_open_kfid, kf_event_sync_token):
+    """
+    拉取并回复客服消息。
+    target_open_kfid: 需要拉取消息的客服OpenKfId (可能来自事件，或全局配置)
+    kf_event_sync_token: 从 kf_msg_or_event 事件中获取的，用于 sync_msg 接口的 Token
+    """
     try:
         access_token = get_wecom_access_token()
-        print(f"✅ 获取 access_token 成功 (用于客服ID: {open_kfid_to_sync})")
+        print(f"✅ 开始为客服ID {target_open_kfid} 拉取消息，使用 event_token: {'******' if kf_event_sync_token else 'N/A'}")
 
+        # !!! 注意：请根据文档 https://kf.weixin.qq.com/api/doc/path/94744 (读取消息)
+        # 确认 sync_msg 接口的 JSON body 中是否需要以及如何传递 kf_event_sync_token。
+        # 假设它是在 json body 中以 "token" 字段传递。
         sync_payload = {
-            "open_kfid": open_kfid_to_sync,
+            "open_kfid": target_open_kfid,
             "cursor": "",
-            "limit": 100 # 可按需调整
-            # 这个版本的 sync_msg 调用中没有包含 "token": TOKEN 参数，
-            # 如果您的回调配置需要，可以加上："token": TOKEN
+            "limit": 100, # 可按需调整
+            "token": kf_event_sync_token # 使用从事件中获取的KF_EVENT_TOKEN
         }
+        
+        # 检查kf_event_sync_token是否存在，如果接口强制要求此token
+        if not kf_event_sync_token:
+            print(f"❌ 缺少 kf_event_sync_token，无法调用 sync_msg (fetch_and_respond for kfid: {target_open_kfid})")
+            # 根据实际情况，这里可能需要更复杂的错误处理或直接返回
+            return
+
+        print(f"ℹ️ 调用 sync_msg, payload: open_kfid='{target_open_kfid}', token='{kf_event_sync_token[:5]}...' (fetch_and_respond)")
         res = requests.post(
             f"https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token={access_token}",
             json=sync_payload
         ).json()
 
         if res.get("errcode") != 0:
-            raise Exception(f"拉取消息失败: {res}")
+            # 如果是 token 无效的错误，需要特别注意 kf_event_sync_token 的来源和正确性
+            print(f"❌ 拉取消息失败 (fetch_and_respond for kfid: {target_open_kfid}): {res}")
+            # 可以根据 res.get("errcode") 做更细致的错误处理
+            # 例如：40001 access_token 无效, 40013 corpid 无效, 95000 open_kfid 无效, 95012 (kf_event_sync_token 无效或不匹配)
+            # 95012 这个错误码是我编的，您需要查阅文档确认 sync_msg 关于 token 校验失败的错误码
+            return # 拉取失败则不继续处理
 
         msg_list = res.get("msg_list", [])
         if not msg_list:
-            print("ℹ️ 本次同步没有新消息。")
+            print(f"ℹ️ 本次同步没有新消息 (fetch_and_respond for kfid: {target_open_kfid})")
             return
 
-        print(f"📥 收到 {len(msg_list)} 条消息 (为客服ID: {open_kfid_to_sync}):", msg_list)
+        print(f"📥 收到 {len(msg_list)} 条消息 (为客服ID {target_open_kfid}):", msg_list)
 
-        for msg_item in msg_list: # 变量名修改避免与外层 msg 冲突
+        for msg_item in msg_list:
             if msg_item.get("msgtype") == "text":
                 content = msg_item["text"]["content"]
                 external_userid = msg_item["external_userid"]
-                # msgid = msg_item.get("msgid") # 消息ID，可用于去重或记录
+                # msgid = msg_item.get("msgid")
 
-                print(f"💬 待处理消息: 来自 {external_userid}, 内容 '{content}'")
+                print(f"💬 待处理消息: 来自 {external_userid}, 内容 '{content}' (fetch_and_respond)")
 
-                # 使用 openai SDK 调用 GPT
-                # (当前未与上面定义的 ask_gpt 和缓存逻辑集成)
                 gpt_response = openai.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[
@@ -199,7 +251,7 @@ def fetch_and_respond(open_kfid_to_sync): # 参数名修改以反映其用途
 2. 遇到模糊提问（如“你们卖什么”、“怎么买”）要主动介绍商品和服务。
 3. 遇到打招呼（如“你好”、“在吗”）仅回复一次问候语“你好，请问有什么可以帮助您的呢？”。
 4. 如果用户提到未列出的商品，回复“目前没有此商品”，并推荐已有商品。
-5. 回复请简洁明了，直接说结果。"""}, # 您可以从 ask_gpt 函数中同步 system prompt
+5. 回复请简洁明了，直接说结果。"""},
                         {"role": "user", "content": content}
                     ],
                     temperature=0.3,
@@ -209,7 +261,7 @@ def fetch_and_respond(open_kfid_to_sync): # 参数名修改以反映其用途
 
                 send_payload = {
                     "touser": external_userid,
-                    "open_kfid": open_kfid_to_sync, # 使用哪个客服身份发送
+                    "open_kfid": target_open_kfid,
                     "msgtype": "text",
                     "text": {"content": reply_text},
                 }
@@ -219,18 +271,18 @@ def fetch_and_respond(open_kfid_to_sync): # 参数名修改以反映其用途
                 ).json()
                 
                 if send_res.get("errcode") == 0:
-                    print(f"📤 成功回复 {external_userid}: {reply_text}")
+                    print(f"📤 成功回复 {external_userid}: {reply_text} (fetch_and_respond)")
                 else:
-                    print(f"❌ 发送回复给 {external_userid} 失败: {send_res}")
+                    print(f"❌ 发送回复给 {external_userid} 失败: {send_res} (fetch_and_respond)")
             else:
-                print(f"⏭️ 跳过非文本消息: {msg_item.get('msgtype')}")
+                print(f"⏭️ 跳过非文本消息: {msg_item.get('msgtype')} (fetch_and_respond)")
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ 网络请求错误 (fetch_and_respond): {e}")
+        print(f"❌ 网络请求错误 (fetch_and_respond for kfid: {target_open_kfid}): {e}")
         traceback.print_exc()
     except Exception as e:
-        print(f"❌ 处理并回复消息失败 (fetch_and_respond, 客服ID: {open_kfid_to_sync}): {e}")
-        traceback.print_exc() # 添加 traceback 打印
+        print(f"❌ 处理并回复消息失败 (fetch_and_respond for kfid: {target_open_kfid}): {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
