@@ -101,7 +101,10 @@ def wechat_kf():
         timestamp = request.args.get("timestamp")
         nonce = request.args.get("nonce")
         echostr = request.args.get("echostr", "")
-        return echostr
+        # 使用 make_response 返回纯文本，确保 header 正确
+        response = make_response(echostr)
+        response.headers["Content-Type"] = "text/plain"
+        return response
 
         if not all([msg_signature, timestamp, nonce, echostr]):
             print("❌ GET 请求缺少参数 (wechat_kf)")
