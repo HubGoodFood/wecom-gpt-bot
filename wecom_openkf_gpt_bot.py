@@ -6,7 +6,7 @@ import requests
 import base64
 import struct
 import traceback
-from flask import Flask, request, abort
+from flask import Flask, request, abort, make_response
 from dotenv import load_dotenv
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.exceptions import InvalidSignatureException # 只导入 InvalidSignatureException
@@ -153,7 +153,8 @@ def wechat_kf():
             traceback.print_exc()
             return "Verification failed (Processing Error)", 403
 
-    elif request.method == "POST":
+    if request.method == "POST":
+        
         try:
             msg_signature = request.args.get("msg_signature")
             timestamp = request.args.get("timestamp")
