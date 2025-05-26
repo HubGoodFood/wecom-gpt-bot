@@ -94,8 +94,11 @@ def ask_gpt(question):
 def wechat_kf():
     if request.method == "GET":
         # 企业微信 GET 验证回调地址
-        echostr = request.args.get("echostr", "")
-        return echostr
+        msg_signature = request.args.get("msg_signature")
+        timestamp = request.args.get("timestamp")
+        nonce = request.args.get("nonce")
+        echostr = request.args.get("echostr")
+        return echostr  # 必须返回原样
     try:
         msg_signature = request.args.get("msg_signature")
         timestamp = request.args.get("timestamp")
